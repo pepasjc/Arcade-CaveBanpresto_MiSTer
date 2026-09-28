@@ -14,6 +14,9 @@ set_global_assignment -name QIP_FILE sys/pll_audio.qip
 set_global_assignment -name QIP_FILE sys/pll_cfg.qip
 set_global_assignment -name QIP_FILE sys/pll_hdmi.qip
 set_global_assignment -name VERILOG_FILE rtl/reset_ctrl.v
+# RetroAchievements RAM mirror (from jotego's JTFRAME, GPL-3.0-or-later)
+set_global_assignment -name VERILOG_FILE rtl/ra/ra_mirror_gather.v
+set_global_assignment -name VERILOG_FILE rtl/ra/ra_ddr_arb.v
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-CaveBanpresto.sv
 set_global_assignment -name SDC_FILE Arcade-CaveBanpresto.sdc
 set_global_assignment -name VERILOG_MACRO "CAVE_68K_BANPRESTO=1"

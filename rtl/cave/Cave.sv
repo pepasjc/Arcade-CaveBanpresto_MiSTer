@@ -108,7 +108,11 @@ module Cave(
   input         ddr_wait_n,
   input         ddr_valid,
   output [7:0]  ddr_burstLength,
-  input         ddr_burstDone
+  input         ddr_burstDone,
+  // RetroAchievements RAM mirror read port (system clock domain): qword
+  // address in the 64 kB mirror, data one clock later. See ra_rd_q below.
+  input  [12:0] ra_rd_addr,
+  output [63:0] ra_rd_q
 );
 
   localparam [47:0] SS_COMPILED_SUPPORT =
@@ -3115,6 +3119,20 @@ module Cave(
     .io_ss_blocked_normal_write (saveStateVideoBlockedWrite),
     .io_ss_restore_applied      (saveStateVideoRestoreApplied)
   );
+  // RetroAchievements RAM mirror (Arcade-CaveBanpresto.sv). RA sets use
+  // FinalBurn Neo's d_sailormn.cpp "RAM" area: Ram01 (68K work RAM, 0x100000)
+  // at 0, Ram02, Ram03, then RamZ80 (8 kB) at 0x1C004. The 64 kB mirror is:
+  //   qwords 0x0000-0x1BFF (bytes 0x0000-0xDFFF): 68K work RAM bytes
+  //     0x0000-0xDFFF, each 16-bit word as-is in a little-endian lane
+  //     (mirror byte k = 68K byte k^1, FinalBurn Neo's order)
+  //   qwords 0x1C00-0x1FFF (bytes 0xE000-0xFFFF): the whole Z80 RAM, byte
+  //     for byte (RA 0x1C004-0x1E003)
+  // Both are read through second ports of the RAMs themselves.
+  wire [63:0] ra_main_q, ra_z80_q;
+  reg         ra_rd_z80;
+  always @(posedge clock) ra_rd_z80 <= &ra_rd_addr[12:10];
+  assign ra_rd_q = ra_rd_z80 ? ra_z80_q : ra_main_q;
+
   Main main (
     .clock                                  (cpuClock),
     .reset                                  (cpuDomainReset),
@@ -3123,6 +3141,8 @@ module Cave(
     .io_videoClock                          (videoClock),
     .io_spriteClock                         (clock),
     .io_gameIndex                           (gameIndexCpuReg),
+    .io_ra_rd_addr                          (ra_rd_addr),
+    .io_ra_rd_q                             (ra_main_q),
     .io_options_service                     (options_service),
     .io_player_0_up                         (player_0_up),
     .io_player_0_down                       (player_0_down),
@@ -3468,6 +3488,9 @@ module Cave(
   Sound sound (
     .clock                        (cpuClock),
     .reset                        (cpuDomainReset),
+    .io_ra_clock                  (clock),
+    .io_ra_z80_addr               (ra_rd_addr[9:0]),
+    .io_ra_z80_q                  (ra_z80_q),
     .io_ctrl_oki_0_wr             (_main_io_soundCtrl_oki_0_wr),
     .io_ctrl_oki_0_din            (_main_io_soundCtrl_oki_0_din),
     .io_ctrl_oki_0_dout           (_main_io_soundCtrl_oki_0_dout),

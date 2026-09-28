@@ -76,7 +76,12 @@ module Sound(
   output  [7:0] io_ss_owner_fault_debug,
 `endif
   output [63:0] io_debug,
-  output [15:0] io_audio
+  output [15:0] io_audio,
+  // RetroAchievements RAM mirror: read-only 64-bit port of the Z80 RAM
+  // (see CaveBanprestoSoundRamSaveStateOwner), clocked by io_ra_clock.
+  input         io_ra_clock,
+  input   [9:0] io_ra_z80_addr,
+  output [63:0] io_ra_z80_q
 );
   wire        hotdogZ80;
   wire        mazingerZ80;
@@ -795,6 +800,9 @@ module Sound(
     .runtime_din_i         (cpuDout),
     .runtime_dout_o        (soundRamDout),
     .state_takeover_o      (ssSoundRamTakeover),
+    .ra_clk_i              (io_ra_clock),
+    .ra_addr_i             (io_ra_z80_addr),
+    .ra_q_o                (io_ra_z80_q),
     .ssbus                 (soundOwnerBus[1])
   );
 

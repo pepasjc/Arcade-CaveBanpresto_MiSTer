@@ -12,6 +12,12 @@ module Main(
   input          io_videoClock,
   input          io_spriteClock,
   input  [3:0]   io_gameIndex,
+  // RetroAchievements RAM mirror: second, read-only port of the 64 kB 68K
+  // work RAM (mainRam, CPU 0x100000), 64 bits wide (qword n = 68K words
+  // 4n..4n+3, lowest word in bits 15:0), clocked by io_systemClock.
+  // Registered address, data one clock later.
+  input  [12:0]  io_ra_rd_addr,
+  output [63:0]  io_ra_rd_q,
   input          io_options_service,
   input          io_player_0_up,
   input          io_player_0_down,
@@ -3048,19 +3054,29 @@ module Main(
   assign mainRamPhysicalDin =
     highScoreRamOwned && !highScoreRamTargetSprite ?
       highScoreRamDin : mainRamSaveStateDin;
-  CaveSinglePortRam #(
-    .ADDR_WIDTH  (15),
-    .DATA_WIDTH  (16),
-    .DEPTH       (0),
-    .MASK_ENABLE (1)
+  // RA mirror: was CaveSinglePortRam. Port A is the unchanged CPU /
+  // save-state / high-score port; port B is a read-only 64-bit port in the
+  // system clock domain for the RetroAchievements DDR mirror (same M10Ks).
+  CaveTrueDualPortRam #(
+    .ADDR_WIDTH_A (15),
+    .ADDR_WIDTH_B (13),
+    .DATA_WIDTH_A (16),
+    .DATA_WIDTH_B (64),
+    .DEPTH_A      (0),
+    .DEPTH_B      (0),
+    .MASK_ENABLE  (1)
   ) mainRam (
-    .clock (clock),
-    .rd    (mainRamPhysicalRd),
-    .wr    (mainRamPhysicalWr),
-    .addr  (mainRamPhysicalAddr),
-    .mask  (mainRamPhysicalMask),
-    .din   (mainRamPhysicalDin),
-    .dout  (_mainRam_io_dout)
+    .clock_a (clock),
+    .rd_a    (mainRamPhysicalRd),
+    .wr_a    (mainRamPhysicalWr),
+    .addr_a  (mainRamPhysicalAddr),
+    .mask_a  (mainRamPhysicalMask),
+    .din_a   (mainRamPhysicalDin),
+    .dout_a  (_mainRam_io_dout),
+    .clock_b (io_systemClock),
+    .rd_b    (1'b1),
+    .addr_b  (io_ra_rd_addr),
+    .dout_b  (io_ra_rd_q)
   );
   wire        airGalletWorkRamPhysicalRd;
   wire        airGalletWorkRamPhysicalWr;

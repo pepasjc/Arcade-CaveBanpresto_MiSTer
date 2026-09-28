@@ -55,7 +55,7 @@ assign VIDEO_ARY = (!aspect_ratio) ? (orientation ? 12'd4 : 12'd3) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
-  "cavebanpresto;SS3E000000:400000;",
+  "RA_cavebanpresto;SS3E000000:400000;",
   "P1,Video Options;",
   "D0P1O12,Aspect Ratio,Original,Fullscreen,[ARC1],[ARC2];",
   "D0P1O4,Flip Screen,Off,On;",
@@ -584,11 +584,15 @@ wire player_2_pause    =             joystick_1[10];
 ////////////////////////////////////////////////////////////////////////////////
 
 wire [31:0] ddr_addr;
+wire        cave_ddr_rd, cave_ddr_we, cave_ddr_busy;
+wire  [7:0] cave_ddr_be, cave_ddr_burstcnt;
+wire [63:0] cave_ddr_din;
+wire [12:0] ra_rd_addr;
+wire [63:0] ra_rd_q;
 wire        sdram_oe_n;
 wire [15:0] sdram_din;
 wire [15:0] sdram_dout;
 
-assign DDRAM_ADDR = ddr_addr[31:3];
 assign SDRAM_DQ = sdram_oe_n ? sdram_din : 16'bZ;
 assign sdram_dout = SDRAM_DQ;
 assign SDRAM_DQMH = 0;
@@ -665,15 +669,19 @@ Cave cave (
   .frameBufferCtrl_lowLat(FB_LL),
   .frameBufferCtrl_forceBlank(FB_FORCE_BLANK),
   // DDR
-  .ddr_rd(DDRAM_RD),
-  .ddr_wr(DDRAM_WE),
+  .ddr_rd(cave_ddr_rd),
+  .ddr_wr(cave_ddr_we),
   .ddr_addr(ddr_addr),
-  .ddr_mask(DDRAM_BE),
-  .ddr_din(DDRAM_DIN),
+  .ddr_mask(cave_ddr_be),
+  .ddr_din(cave_ddr_din),
   .ddr_dout(DDRAM_DOUT),
-  .ddr_wait_n(~DDRAM_BUSY),
+  .ddr_wait_n(~cave_ddr_busy),
   .ddr_valid(DDRAM_DOUT_READY),
-  .ddr_burstLength(DDRAM_BURSTCNT),
+  .ddr_burstLength(cave_ddr_burstcnt),
+  .ddr_burstDone(1'b0),
+  // RetroAchievements RAM mirror read port
+  .ra_rd_addr(ra_rd_addr),
+  .ra_rd_q(ra_rd_q),
   // SDRAM
   .sdram_cke(SDRAM_CKE),
   .sdram_cs_n(SDRAM_nCS),
@@ -704,6 +712,76 @@ Cave cave (
   .led_power(LED_POWER[0]),
   .led_disk(LED_DISK[0]),
   .led_user(LED_USER)
+);
+
+////////////////////////////////////////////////////////////////////////////////
+// RETROACHIEVEMENTS RAM MIRROR
+////////////////////////////////////////////////////////////////////////////////
+//
+// Once per VBlank, 64 kB read straight out of the 68K work RAM and the sound
+// Z80 RAM through second ports of those RAMs (rtl/cave/Cave.sv) is copied to
+// DDR3 at 0x3D000000 in the "RACH" layout the RA build of Main_MiSTer reads
+// (rtl/ra/ra_mirror_gather.v, from jotego's JTFRAME jtframe_ra_mirror.v).
+// RA arcade sets use FinalBurn Neo's d_sailormn.cpp "RAM" area; ARM region
+// table { ra_start, len, mirror_offset }:
+//   { 0x00000, 0xE000, 0x0000 }  68K work RAM 0x100000-0x10DFFF (swapped)
+//   { 0x1C004, 0x2000, 0xE000 }  Z80 RAM (RamZ80), byte for byte
+// The DDR port is shared with the core through ra_ddr_arb, which only
+// switches owners at transaction boundaries; the mirror releases it after
+// every 256-byte burst while it gathers the next one.
+
+reg  [1:0] ra_vblank_sync = 2'b0;
+always @(posedge clk_sys) ra_vblank_sync <= {ra_vblank_sync[0], vblank};
+
+reg  [63:0] ra_rd_q_r;
+always @(posedge clk_sys) ra_rd_q_r <= ra_rd_q;
+
+wire        ra_ddr_we, ra_ddr_busy;
+wire  [7:0] ra_ddr_burstcnt, ra_ddr_be;
+wire [28:0] ra_ddr_addr;
+wire [63:0] ra_ddr_din;
+
+ra_mirror_gather #(.DW(64), .RD_LAT(2)) ra_mirror (
+  .rst          (rst_sys),
+  .clk          (clk_sys),
+  .vblank       (ra_vblank_sync[1]),
+  .hold         (ioctl_download | ss_active),
+  .rd_en        (),
+  .rd_addr      (ra_rd_addr),
+  .rd_data      (ra_rd_q_r),
+  .ddr_we       (ra_ddr_we),
+  .ddr_busy     (ra_ddr_busy),
+  .ddr_burstcnt (ra_ddr_burstcnt),
+  .ddr_addr     (ra_ddr_addr),
+  .ddr_be       (ra_ddr_be),
+  .ddr_din      (ra_ddr_din),
+  .active       ()
+);
+
+ra_ddr_arb ra_ddr_arb (
+  .clk            (clk_sys),
+  .rst            (rst_sys),
+  .ddr_busy       (DDRAM_BUSY),
+  .ddr_dout_ready (DDRAM_DOUT_READY),
+  .c0_rd          (cave_ddr_rd),
+  .c0_we          (cave_ddr_we),
+  .c0_addr        (ddr_addr[31:3]),
+  .c0_be          (cave_ddr_be),
+  .c0_din         (cave_ddr_din),
+  .c0_burstcnt    (cave_ddr_burstcnt),
+  .c0_busy        (cave_ddr_busy),
+  .c1_we          (ra_ddr_we),
+  .c1_addr        (ra_ddr_addr),
+  .c1_be          (ra_ddr_be),
+  .c1_din         (ra_ddr_din),
+  .c1_burstcnt    (ra_ddr_burstcnt),
+  .c1_busy        (ra_ddr_busy),
+  .ddr_rd         (DDRAM_RD),
+  .ddr_we         (DDRAM_WE),
+  .ddr_addr       (DDRAM_ADDR),
+  .ddr_be         (DDRAM_BE),
+  .ddr_din        (DDRAM_DIN),
+  .ddr_burstcnt   (DDRAM_BURSTCNT)
 );
 
 endmodule

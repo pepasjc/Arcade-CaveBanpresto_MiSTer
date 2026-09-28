@@ -32,6 +32,13 @@ module CaveBanprestoSoundRamSaveStateOwner (
 
 	output wire        state_takeover_o,
 
+	// RetroAchievements RAM mirror: read-only 64-bit port of the same RAM on
+	// ra_clk_i (qword n = RAM bytes 8n..8n+7, byte 8n in bits 7:0).
+	// Registered address, data one clock later.
+	input  wire        ra_clk_i,
+	input  wire  [9:0] ra_addr_i,
+	output wire [63:0] ra_q_o,
+
 	cavebanpresto_ssbus_if.responder ssbus
 );
 
@@ -90,16 +97,30 @@ module CaveBanprestoSoundRamSaveStateOwner (
 		.ssbus(ssbus)
 	);
 
-	// The local VHDL bridge binds the same production single_port_ram entity
-	// and exact parameters as Sound.sv. It exists only to make the VHDL
-	// Boolean MASK_ENABLE binding explicit across mixed-language tools.
-	CaveBanprestoSoundRamPrimitive ram (
-		.clock(clk_i),
-		.rd(ram_rd),
-		.wr(ram_wr),
-		.addr(ram_addr),
-		.din(ram_din),
-		.dout(ram_dout)
+	// RA mirror: was CaveBanprestoSoundRamPrimitive (single_port_ram, 8-bit x
+	// 8192). Port A is that port unchanged (owner/restore and Z80 traffic);
+	// port B is a read-only 64-bit port for the RetroAchievements DDR mirror,
+	// so save-state restores are seen too. Same RAM bits.
+	CaveTrueDualPortRam #(
+		.ADDR_WIDTH_A(13),
+		.ADDR_WIDTH_B(10),
+		.DATA_WIDTH_A(8),
+		.DATA_WIDTH_B(64),
+		.DEPTH_A(0),
+		.DEPTH_B(0),
+		.MASK_ENABLE(0)
+	) ram (
+		.clock_a(clk_i),
+		.rd_a(ram_rd),
+		.wr_a(ram_wr),
+		.addr_a(ram_addr),
+		.mask_a(1'b1),
+		.din_a(ram_din),
+		.dout_a(ram_dout),
+		.clock_b(ra_clk_i),
+		.rd_b(1'b1),
+		.addr_b(ra_addr_i),
+		.dout_b(ra_q_o)
 	);
 
 endmodule
